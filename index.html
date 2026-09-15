@@ -125,6 +125,7 @@
   .icon-type{ background:rgba(52,152,219,0.2); color:var(--blue); }
   .icon-match{ background:rgba(39,174,96,0.2); color:var(--green); }
   .icon-combo{ background:rgba(200,120,20,0.2); color:#e8963a; }
+  .icon-mix{ background:rgba(155,89,182,0.22); color:#c39bd3; }
   .icon-race{ background:rgba(240,192,64,0.18); color:var(--gold); }
   .mode-card h3{ font-family:var(--font-display); text-transform:uppercase; letter-spacing:0.05em; font-size:19px; margin:0 0 6px; }
   .mode-card p{ color:var(--muted); font-size:13px; line-height:1.5; margin:0; }
@@ -681,6 +682,7 @@
         <button class="btn btn-ghost" onclick="openAvatar()">🎽 Avatar</button>
         <button class="btn btn-ghost" onclick="openAccount()">👤 Account</button>
         <button class="btn btn-ghost" onclick="openLeaderboard()">🏆 Friends</button>
+        <button class="btn btn-ghost" onclick="downloadApp()" title="Save app to your computer">⬇ Download</button>
       </div>
     </div>
 
@@ -709,6 +711,11 @@
         <div class="mode-icon icon-combo">🥋</div>
         <h3>Build a Combo</h3>
         <p>3 or 5 rounds. Assemble the technique piece by piece — decoys included.</p>
+      </div>
+      <div class="mode-card" data-mode="mix">
+        <div class="mode-icon icon-mix">🎲</div>
+        <h3>Mixed Drill</h3>
+        <p>Random mix of Quiz, Type It, Match Up, and Build a Combo in one session.</p>
       </div>
     </div>
   </div>
@@ -787,6 +794,31 @@
       <div class="controls-row" style="margin-top:26px;">
         <button class="btn btn-primary" style="flex:1;" onclick="startFlash()">Start →</button>
       </div>
+    </div>
+  </div>
+
+
+  <!-- ===== MIXED DRILL SETUP ===== -->
+  <div class="practice-view" id="view-setup-mix">
+    <button class="back-btn" onclick="goHome()">← Back to categories</button>
+    <div class="card-shell">
+      <h2 class="mode-title">Mixed Drill Setup</h2>
+      <p class="mode-cat-tag">Random Quiz · Type It · Match Up · Combo</p>
+      <div class="setup-label">Category</div>
+      <div class="setup-pills" id="mixCatPills"></div>
+      <div class="setup-label">How many activities?</div>
+      <div class="count-options" id="mixCountOptions"></div>
+      <div class="controls-row" style="margin-top:28px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="startMix()">Start Mixed Drill →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MIXED DRILL RESULTS (used when whole mix finishes) ===== -->
+  <div class="practice-view" id="view-mix-results">
+    <button class="back-btn" onclick="goHome()">← Back to categories</button>
+    <div class="card-shell">
+      <div class="results-screen" id="mixResultsInner"></div>
     </div>
   </div>
 
@@ -1541,6 +1573,7 @@ function timerBonus(timeLeftSec, totalSec, maxBonus){
 /* ===================== NAVIGATION ===================== */
 function hideAllViews(){ document.querySelectorAll('.practice-view').forEach(v=>v.classList.remove('active')); document.getElementById('landing').style.display='none'; }
 function goHome(){
+  mixActive = false;
   document.getElementById('landing').style.display = 'block';
   document.querySelectorAll('.practice-view').forEach(v=>v.classList.remove('active'));
   renderDashboard();
@@ -1556,6 +1589,7 @@ document.querySelectorAll('.mode-card').forEach(card=>{
     if(mode==='type'){ showView('view-setup-type'); renderTypeSetup(); }
     if(mode==='match'){ showView('view-setup-match'); renderMatchSetup(); }
     if(mode==='combo'){ showView('view-setup-combo'); renderComboSetup(); }
+    if(mode==='mix'){ showView('view-setup-mix'); renderMixSetup(); }
   });
 });
 function openAvatar(){ showView('view-avatar'); renderAvatarScreen(); }
@@ -1834,6 +1868,12 @@ function advanceQuiz(){
   else{ if(quizTimer) quizTimer.cancel(); showQuizResults(); }
 }
 function showQuizResults(){
+  if(mixActive){
+    mixScore += quizScore;
+    mixIdx++;
+    nextMixActivity();
+    return;
+  }
   document.getElementById('quizBody').style.display='none';
   const beltBefore = getBelt(PROFILE.career);
   awardPoints(quizScore);
@@ -1994,6 +2034,12 @@ function advanceType(){
   else{ if(typeTimer) typeTimer.cancel(); showTypeResults(); }
 }
 function showTypeResults(){
+  if(mixActive){
+    mixScore += typeScore;
+    mixIdx++;
+    nextMixActivity();
+    return;
+  }
   document.getElementById('typeBody').style.display='none';
   const beltBefore = getBelt(PROFILE.career);
   awardPoints(typeScore);
@@ -2129,6 +2175,12 @@ function selectMatch(el, side, termKey){
 }
 function showMatchResults(){
   if(matchTimer) matchTimer.cancel();
+  if(mixActive){
+    mixScore += matchPoints;
+    mixIdx++;
+    nextMixActivity();
+    return;
+  }
   document.getElementById('matchBody').style.display='none';
   const beltBefore = getBelt(PROFILE.career);
   awardPoints(matchPoints);
@@ -2278,6 +2330,12 @@ document.getElementById('comboCheck').addEventListener('click', ()=>{
   }
 });
 function showComboResults(){
+  if(mixActive){
+    mixScore += comboScore;
+    mixIdx++;
+    nextMixActivity();
+    return;
+  }
   document.getElementById('comboBody').style.display='none';
   const beltBefore = getBelt(PROFILE.career);
   awardPoints(comboScore);
@@ -2460,6 +2518,118 @@ function addFriendCode(){
 }
 
 let challengeActive = false, challengeMeta = null, challengeMode = null, challengeTotalItems = 0, matchChallengeRounds = null;
+
+
+/* ===================== MIXED DRILL ===================== */
+let mixRoundChoice = 8, mixQueue = [], mixIdx = 0, mixScore = 0, mixActive = false;
+let _savedQuizRound = 10, _savedTypeRound = 5, _savedMatchRound = 3, _savedComboRound = 3;
+
+function renderMixSetup(){
+  renderCatPicker('mixCatPills');
+  const wrap = document.getElementById('mixCountOptions');
+  if(!wrap) return;
+  wrap.innerHTML = '';
+  [6,8,10,12].forEach(n=>{
+    const b = document.createElement('button');
+    b.className = 'count-btn' + (n===mixRoundChoice?' selected':'');
+    b.innerHTML = n + '<span class="sub">activities</span>';
+    b.addEventListener('click', ()=>{ playClick(); mixRoundChoice=n; renderMixSetup(); });
+    wrap.appendChild(b);
+  });
+}
+
+function startMix(){
+  const kinds = ['quiz','type','match','combo'];
+  mixQueue = [];
+  while(mixQueue.length < mixRoundChoice){
+    const shuffled = shuffleArr(kinds);
+    for(const k of shuffled){
+      if(mixQueue.length < mixRoundChoice) mixQueue.push(k);
+    }
+  }
+  mixIdx = 0;
+  mixScore = 0;
+  mixActive = true;
+  // save current round prefs so we can restore after mix
+  _savedQuizRound = quizRoundChoice;
+  _savedTypeRound = typeRoundChoice;
+  _savedMatchRound = matchRoundChoice;
+  _savedComboRound = comboRoundChoice;
+  // force single-unit activities
+  quizRoundChoice = 1;
+  typeRoundChoice = 1;
+  matchRoundChoice = 1;
+  comboRoundChoice = 1;
+  quizTimerChoice = 0;
+  typeTimerChoice = 0;
+  matchTimerChoice = 0;
+  comboTimerChoice = 0;
+  nextMixActivity();
+}
+
+function nextMixActivity(){
+  if(!mixActive) return;
+  if(mixIdx >= mixQueue.length){
+    finishMix();
+    return;
+  }
+  const kind = mixQueue[mixIdx];
+  // small delay so UI can settle between modes
+  setTimeout(()=>{
+    if(kind==='quiz'){ showView('view-quiz'); initQuiz(); }
+    else if(kind==='type'){ showView('view-type'); initType(); }
+    else if(kind==='match'){ showView('view-match'); initMatch(); }
+    else if(kind==='combo'){ showView('view-combo'); initCombo(); }
+  }, 80);
+}
+
+function finishMix(){
+  mixActive = false;
+  // restore prefs
+  quizRoundChoice = _savedQuizRound;
+  typeRoundChoice = _savedTypeRound;
+  matchRoundChoice = _savedMatchRound;
+  comboRoundChoice = _savedComboRound;
+  const beltBefore = getBelt(PROFILE.career);
+  awardPoints(mixScore);
+  const tier = resultTier(mixScore / Math.max(1, mixRoundChoice * 15));
+  showView('view-mix-results');
+  const r = document.getElementById('mixResultsInner');
+  r.innerHTML =
+    beltUpHtml(beltBefore) +
+    '<div class="results-label">Mixed drill complete — '+activeCategory+'</div>'+
+    '<div class="big-score">'+mixScore+'<span> pts</span></div>'+
+    '<div class="results-msg '+tier.cls+'">'+tier.msg+'</div>'+
+    '<div class="results-earn">+'+mixScore+' pts across '+mixRoundChoice+' activities</div>'+
+    '<div class="controls-row"><button class="btn btn-ghost" style="flex:1;" onclick="showView(\'view-setup-mix\'); renderMixSetup();">🔀 Play Again</button>'+
+    '<button class="btn btn-primary" style="flex:1;" onclick="goHome()">Back to Categories</button></div>';
+}
+
+/* Hook each mode's results to continue the mix when mixActive */
+const _origShowQuizResults = typeof showQuizResults === 'function' ? showQuizResults : null;
+const _origShowTypeResults = typeof showTypeResults === 'function' ? showTypeResults : null;
+const _origShowMatchResults = typeof showMatchResults === 'function' ? showMatchResults : null;
+const _origShowComboResults = typeof showComboResults === 'function' ? showComboResults : null;
+
+/* ===================== DOWNLOAD APP ===================== */
+function downloadApp(){
+  playClick();
+  try{
+    // Prefer fetching the current document so the saved file matches what you see
+    const html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+    const blob = new Blob([html], {type:'text/html;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Taekwondo-Term-Master.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){
+    alert('Could not download automatically. On the live site, use your browser menu: File → Save Page As…');
+  }
+}
 
 /* ===================== INIT ===================== */
 updateThemeBtn();
